@@ -16,6 +16,18 @@ router = Router()
 plane_service = PlaneService()
 mattermost_service = MattermostService()
 
+async def get_ticket_by_mattermost_post_id(session: AsyncSession, mattermost_post_id: str) -> Optional[Ticket]:
+    """Получает тикет по ID поста в Mattermost"""
+    return await session.scalar(
+        select(Ticket).where(Ticket.mattermost_post_id == mattermost_post_id)
+    )
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
+    """Получает пользователя по ID"""
+    return await session.scalar(
+        select(User).where(User.id == user_id)
+    )
+
 @router.message(TicketCreation.waiting_description)
 async def process_description(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка описания тикета"""

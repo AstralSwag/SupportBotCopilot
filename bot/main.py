@@ -1,18 +1,18 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from fastapi import FastAPI
 from bot.config import settings
 from bot.database import init_db, redis, close_db
-from bot.handlers import registration, tickets
+from bot.handlers import registration, tickets, mattermost
 from bot.middlewares.database import DatabaseMiddleware
+from bot.bot import bot
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-bot = Bot(token=settings.BOT_TOKEN)
 storage = RedisStorage(redis=redis)
 dp = Dispatcher(storage=storage)
 polling_task = None
@@ -22,6 +22,9 @@ dp.include_router(registration.router)
 dp.include_router(tickets.router)
 dp.message.middleware(DatabaseMiddleware())
 dp.callback_query.middleware(DatabaseMiddleware())
+
+# Регистрация роутера для вебхуков Mattermost
+app.include_router(mattermost.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():

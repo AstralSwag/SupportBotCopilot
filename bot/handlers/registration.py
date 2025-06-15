@@ -3,8 +3,8 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..models.models import User
-from ..fsm import UserRegistration
+from bot.models.models import User
+from bot.fsm import UserRegistration
 from sqlalchemy import select
 
 router = Router()

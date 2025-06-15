@@ -1,5 +1,5 @@
 from mattermostdriver import Driver
-from ..config import settings
+from bot.config import settings
 
 class MattermostService:
     def __init__(self):
@@ -14,18 +14,24 @@ class MattermostService:
         
     async def create_thread(self, title: str, message: str) -> str:
         """Создает новую тему в Mattermost"""
-        self.client.login()
-        post = self.client.posts.create_post({
-            'channel_id': self.channel_id,
-            'message': f"### {title}\n{message}"
-        })
-        return post['id']
+        try:
+            self.client.login()
+            post = self.client.posts.create_post({
+                'channel_id': self.channel_id,
+                'message': f"### {title}\n{message}"
+            })
+            return post['id']
+        except Exception as e:
+            raise Exception(f"Failed to create Mattermost thread: {str(e)}")
         
     async def add_comment(self, thread_id: str, message: str):
         """Добавляет комментарий в существующую тему"""
-        self.client.login()
-        self.client.posts.create_post({
-            'channel_id': self.channel_id,
-            'message': message,
-            'root_id': thread_id
-        })
+        try:
+            self.client.login()
+            self.client.posts.create_post({
+                'channel_id': self.channel_id,
+                'message': message,
+                'root_id': thread_id
+            })
+        except Exception as e:
+            raise Exception(f"Failed to add comment to Mattermost thread: {str(e)}")

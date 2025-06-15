@@ -2,7 +2,7 @@ from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..database import async_session
+from bot.database import async_session
 
 class DatabaseMiddleware(BaseMiddleware):
     async def __call__(

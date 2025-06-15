@@ -3,39 +3,55 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from fastapi import FastAPI
-from .config import settings
-from .database import init_db, redis
-from .handlers import registration, tickets
-from .middlewares.database import DatabaseMiddleware
+from bot.config import settings
+from bot.database import init_db, redis, close_db
+from bot.handlers import registration, tickets
+from bot.middlewares.database import DatabaseMiddleware
 
-# Настройка логирования
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Инициализация FastAPI
 app = FastAPI()
-
-# Инициализация бота
 bot = Bot(token=settings.BOT_TOKEN)
 storage = RedisStorage(redis=redis)
 dp = Dispatcher(storage=storage)
+polling_task = None
 
-# Регистрация роутеров
+# Регистрация роутеров и middleware
 dp.include_router(registration.router)
 dp.include_router(tickets.router)
-
-# Регистрация middleware
 dp.message.middleware(DatabaseMiddleware())
 dp.callback_query.middleware(DatabaseMiddleware())
 
 @app.on_event("startup")
 async def startup_event():
-    """Действия при запуске приложения"""
-    # Инициализация базы данных
+    global polling_task
     await init_db()
-    
-    # Запуск бота
-    asyncio.create_task(dp.start_polling(bot))
+    await bot.delete_webhook(drop_pending_updates=True)
+    polling_task = asyncio.create_task(dp.start_polling(bot))
+    logger.info("Бот запущен")
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.on_event("shutdown")
+async def shutdown_event():
+    global polling_task
+    logger.info("Начало процесса завершения работы...")
+    
+    try:
+        # Останавливаем поллинг
+        await dp.stop_polling()
+        
+        if polling_task:
+            polling_task.cancel()
+            try:
+                await polling_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Закрываем соединения
+        await dp.storage.close()
+        await bot.session.close()
+        await close_db()
+        
+        logger.info("Завершение работы выполнено успешно")
+    except Exception as e:
+        logger.error(f"Ошибка при завершении работы: {e}")

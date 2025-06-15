@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from redis.asyncio import Redis
-from .config import settings
+from bot.config import settings
 
 # PostgreSQL
 DATABASE_URL = f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
@@ -29,4 +29,6 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
 async def close_db():
+    """Close database connections"""
     await engine.dispose()
+    await redis.close()

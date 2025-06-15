@@ -4,20 +4,89 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
-from ..models.models import User, Ticket, Message as TicketMessage
-from ..services.plane import PlaneService
-from ..services.mattermost import MattermostService
-from ..fsm import TicketCreation, TicketSelection
-from ..config import settings
-from sqlalchemy import select
+from bot.models.models import User, Ticket, Message as TicketMessage
+from bot.services.plane import PlaneService
+from bot.services.mattermost import MattermostService
+from bot.fsm import TicketCreation, TicketSelection
+from bot.config import settings
+from sqlalchemy import select, and_
+from typing import Optional
 
 router = Router()
 plane_service = PlaneService()
 mattermost_service = MattermostService()
 
-@router.message(F.text & ~Command("start"))
+@router.message(TicketCreation.waiting_description)
+async def process_description(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка описания тикета"""
+    await state.update_data(initial_message=message.text)
+    await state.set_state(TicketCreation.waiting_confirmation)
+    await message.answer(
+        "Я создам новое обращение с вашим сообщением. "
+        "Пожалуйста, подтвердите создание обращения (да/нет):"
+    )
+
+@router.message(TicketCreation.waiting_confirmation)
+async def process_confirmation(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка подтверждения создания тикета"""
+    if message.text.lower() not in ['да', 'нет']:
+        await message.answer("Пожалуйста, ответьте 'да' или 'нет':")
+        return
+
+    if message.text.lower() == 'нет':
+        await state.clear()
+        await message.answer("Создание обращения отменено.")
+        return
+
+    data = await state.get_data()
+    initial_message = data.get('initial_message')
+    if not initial_message:
+        await state.clear()
+        await message.answer("Произошла ошибка. Пожалуйста, напишите ваше сообщение заново.")
+        return
+
+    user = await session.scalar(
+        select(User).where(User.telegram_id == message.from_user.id)
+    )
+    if not user:
+        await message.answer("Пожалуйста, начните с команды /start для регистрации.")
+        await state.clear()
+        return
+
+    # Создаем тикет в системах
+    title = f"Обращение от {user.full_name}"
+    try:
+        plane_ticket_id = await plane_service.create_ticket(title, initial_message)
+        mattermost_post_id = await mattermost_service.create_thread(title, initial_message)
+        
+        # Создаем тикет в БД
+        new_ticket = Ticket(
+            user_id=user.id,
+            plane_ticket_id=plane_ticket_id,
+            mattermost_post_id=mattermost_post_id,
+            status="new"
+        )
+        session.add(new_ticket)
+        await session.commit()
+
+        await message.answer(
+            "Обращение создано. Мы рассмотрим его как можно скорее.\n"
+            "Вы можете продолжать отправлять сообщения в этот тикет."
+        )
+    except Exception as e:
+        await message.answer("Произошла ошибка при создании обращения. Пожалуйста, попробуйте позже.")
+        print(f"Error creating ticket: {e}")
+    finally:
+        await state.clear()
+
+@router.message(~Command(commands=["start", "help"]))
 async def process_message(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка входящих сообщений"""
+    current_state = await state.get_state()
+    if current_state is not None:
+        # Если уже есть активное состояние, не обрабатываем сообщение здесь
+        return
+
     # Проверяем регистрацию пользователя
     user = await session.scalar(
         select(User).where(User.telegram_id == message.from_user.id)

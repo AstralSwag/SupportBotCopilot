@@ -9,7 +9,7 @@ from .handlers import registration, tickets
 from .middlewares.database import DatabaseMiddleware
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 # Инициализация FastAPI
 app = FastAPI()

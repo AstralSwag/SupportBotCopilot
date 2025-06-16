@@ -8,6 +8,7 @@ class UserRegistration(StatesGroup):
 
 class TicketCreation(StatesGroup):
     """Состояния для создания тикета"""
+    waiting_title = State()
     waiting_description = State()
     waiting_confirmation = State()
 

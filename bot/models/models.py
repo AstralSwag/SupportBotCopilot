@@ -19,12 +19,12 @@ class Ticket(Base):
     __tablename__ = "tickets"
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(100), nullable=False)
     plane_ticket_id = Column(String, nullable=False)
     mattermost_post_id = Column(String, nullable=False)
     status = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     user = relationship("User", back_populates="tickets")
     messages = relationship("Message", back_populates="ticket")

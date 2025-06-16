@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     MATTERMOST_TOKEN: str
     MATTERMOST_TEAM: str
     MATTERMOST_CHANNEL: str
+    MATTERMOST_SUPPORT_USER_ID: str
+    MATTERMOST_SUPPORT_USERNAME: str
     
     # Plane.so
     PLANE_API_URL: str

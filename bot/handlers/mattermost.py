@@ -4,6 +4,7 @@ from bot.bot import bot
 from bot.database import get_session
 from bot.services.mattermost import mattermost_service
 from bot.models.models import Message
+from bot.config import settings
 from sqlalchemy import select
 import logging
 from datetime import datetime
@@ -53,7 +54,11 @@ async def mattermost_webhook(request: Request):
             )
             session.add(message)
             await session.commit()
-            
+            # Проверяем, что сообщение от нужного пользователя
+            if data.get("user_id") == settings.MATTERMOST_SUPPORT_USER_ID or data.get("user_name") == settings.MATTERMOST_SUPPORT_USERNAME:
+                logger.info(f"Сообщение от другого пользователя: {data.get('user_name')} ({data.get('user_id')})")
+                return {"status": "ignored"}
+        
             # Отправляем сообщение пользователю через бота
             message_text = data.get("text", "").strip()
             if message_text:

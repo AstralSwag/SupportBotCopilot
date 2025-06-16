@@ -12,3 +12,4 @@ pydantic>=1.8.0
 pydantic-settings>=2.0.0
 mattermostdriver>=7.3.2
 greenlet>=2.0.0
+python-multipart>=0.0.6

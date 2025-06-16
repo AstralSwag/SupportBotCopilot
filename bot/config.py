@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Mattermost
     MATTERMOST_URL: str
     MATTERMOST_TOKEN: str
+    MATTERMOST_WEBHOOK_TOKEN: str
     MATTERMOST_TEAM: str
     MATTERMOST_CHANNEL: str
     MATTERMOST_SUPPORT_USER_ID: str

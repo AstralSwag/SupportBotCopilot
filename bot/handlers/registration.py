@@ -3,22 +3,18 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from bot.models.models import User, Ticket
+from bot.models.models import User
 from bot.fsm import UserRegistration, TicketCreation, TicketSelection
-from sqlalchemy import select
-from datetime import datetime, timedelta
 from bot.keyboards import get_main_keyboard, get_tickets_keyboard
-from bot.config import settings
+from bot.services.ticket_service import TicketService
 
 router = Router()
+ticket_service = TicketService()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка команды /start"""
-    # Проверяем, зарегистрирован ли пользователь
-    user = await session.scalar(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
+    user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
     
     if user:
         await message.answer(
@@ -42,7 +38,6 @@ async def process_fullname(message: Message, state: FSMContext, session: AsyncSe
         await message.answer("Пожалуйста, введите полное имя (имя и фамилию):")
         return
     
-    # Создаем нового пользователя
     new_user = User(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
@@ -60,11 +55,11 @@ async def process_fullname(message: Message, state: FSMContext, session: AsyncSe
 @router.message(F.text == "Создать новую заявку")
 async def create_new_ticket(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка нажатия кнопки создания новой заявки"""
-    user = await session.scalar(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
+    user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
+    if not user:
+        await message.answer("Пожалуйста, начните с команды /start для регистрации.")
+        return
     
-    # Переходим к вводу названия
     await state.set_state(TicketCreation.waiting_title)
     await message.answer(
         "Пожалуйста, введите название заявки (не более 100 символов):"
@@ -73,34 +68,18 @@ async def create_new_ticket(message: Message, state: FSMContext, session: AsyncS
 @router.message(F.text == "Выбрать существующую заявку")
 async def select_existing_ticket(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка нажатия кнопки выбора существующей заявки"""
-    user = await session.scalar(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
+    user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
+    if not user:
+        await message.answer("Пожалуйста, начните с команды /start для регистрации.")
+        return
     
-    # Получаем только активные тикеты пользователя (не закрытые)
-    tickets = await session.scalars(
-        select(Ticket)
-        .where(
-            Ticket.user_id == user.id,
-            Ticket.status != 'closed'  # Исключаем закрытые тикеты
-        )
-        .order_by(Ticket.created_at.desc())
-    )
-    tickets = list(tickets)
+    tickets = await ticket_service.get_active_tickets(session, user.id)
     
     if not tickets:
         await message.answer("У вас нет активных заявок.")
         return
     
-    # Формируем список тикетов для клавиатуры
-    tickets_data = [
-        {
-            "id": ticket.id,
-            "title": ticket.title if ticket.title else f"Тикет #{ticket.id}",
-            "status": ticket.status
-        }
-        for ticket in tickets
-    ]
+    tickets_data = ticket_service.format_tickets_for_keyboard(tickets)
     
     await state.set_state(TicketSelection.selecting_ticket)
     await message.answer(
@@ -113,16 +92,11 @@ async def process_ticket_selection(callback: CallbackQuery, state: FSMContext, s
     """Обработка выбора тикета из списка"""
     ticket_id = int(callback.data.split("_")[1])
     
-    # Получаем тикет
-    ticket = await session.scalar(
-        select(Ticket).where(Ticket.id == ticket_id)
-    )
-    
+    ticket = await ticket_service.get_ticket_by_id(session, ticket_id)
     if not ticket:
         await callback.answer("Тикет не найден")
         return
     
-    # Сохраняем ID выбранного тикета в состоянии
     await state.update_data(selected_ticket_id=ticket_id)
     await state.set_state(TicketSelection.waiting_reply)
     

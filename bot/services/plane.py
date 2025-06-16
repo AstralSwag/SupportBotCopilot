@@ -29,12 +29,16 @@ class PlaneService:
                     raise Exception(f"Failed to create ticket: {result}")
                 return result.get("id") or result.get("pk")
 
-    async def update_ticket(self, ticket_id: str, comment: str):
+    async def update_ticket(self, ticket_id: str, comment: str, is_from_support: bool = False):
         """Добавляет комментарий к существующему тикету"""
         async with aiohttp.ClientSession() as session:
             url = f"{self.base_url}/api/v1/workspaces/{self.workspace_id}/projects/{self.project_id}/issues/{ticket_id}/comments/"
+            
+            # Формируем префикс в зависимости от отправителя
+            prefix = "Сообщение от поддержки:" if is_from_support else "Сообщение от клиента:"
+            
             data = {
-                "comment_html": f"<p>Сообщение от клиента:\n\n{comment}</p>"
+                "comment_html": f"<p>{prefix}\n\n{comment}</p>"
             }
             async with session.post(url, json=data, headers=self.headers) as response:
                 await response.json()

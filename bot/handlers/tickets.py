@@ -3,31 +3,13 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timedelta
-from bot.models.models import User, Ticket, Message as TicketMessage
-from bot.services.plane import PlaneService
-from bot.services.mattermost import MattermostService
+from bot.models.models import User
+from bot.services.ticket_service import TicketService
 from bot.fsm import TicketCreation, TicketSelection
-from bot.config import settings
-from sqlalchemy import select, and_
-from typing import Optional
-from mattermostdriver.exceptions import InvalidOrMissingParameters
+from bot.keyboards import get_tickets_keyboard
 
 router = Router()
-plane_service = PlaneService()
-mattermost_service = MattermostService()
-
-async def get_ticket_by_mattermost_post_id(session: AsyncSession, mattermost_post_id: str) -> Optional[Ticket]:
-    """Получает тикет по ID поста в Mattermost"""
-    return await session.scalar(
-        select(Ticket).where(Ticket.mattermost_post_id == mattermost_post_id)
-    )
-
-async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
-    """Получает пользователя по ID"""
-    return await session.scalar(
-        select(User).where(User.id == user_id)
-    )
+ticket_service = TicketService()
 
 @router.message(TicketCreation.waiting_title)
 async def process_title(message: Message, state: FSMContext, session: AsyncSession):
@@ -38,15 +20,13 @@ async def process_title(message: Message, state: FSMContext, session: AsyncSessi
         await message.answer("Название слишком длинное. Пожалуйста, введите название короче 100 символов:")
         return
     
-    # Получаем информацию о пользователе
-    user = await session.scalar(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
+    user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
+    if not user:
+        await message.answer("Пожалуйста, начните с команды /start для регистрации.")
+        await state.clear()
+        return
     
-    # Сохраняем оригинальное название в состоянии
     await state.update_data(title=title)
-    
-    # Переходим к вводу описания
     await state.set_state(TicketCreation.waiting_description)
     await message.answer("Теперь опишите вашу проблему подробнее:")
 
@@ -56,7 +36,6 @@ async def process_description(message: Message, state: FSMContext, session: Asyn
     await state.update_data(initial_message=message.text)
     await state.set_state(TicketCreation.waiting_confirmation)
     
-    # Получаем сохраненное название
     data = await state.get_data()
     title = data.get('title', '')
     
@@ -88,33 +67,14 @@ async def process_confirmation(message: Message, state: FSMContext, session: Asy
         await message.answer("Произошла ошибка. Пожалуйста, начните создание обращения заново.")
         return
 
-    user = await session.scalar(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
+    user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
     if not user:
         await message.answer("Пожалуйста, начните с команды /start для регистрации.")
         await state.clear()
         return
 
-    # Формируем полное название для Plane и Mattermost
-    full_title = f"{user.full_name}: {title}"
-
-    # Создаем тикет в системах
     try:
-        plane_ticket_id = await plane_service.create_ticket(full_title, initial_message)
-        mattermost_post_id = await mattermost_service.create_thread(full_title, initial_message)
-        
-        # Создаем тикет в БД с оригинальным названием
-        new_ticket = Ticket(
-            user_id=user.id,
-            title=title,  # Сохраняем оригинальное название без префикса
-            plane_ticket_id=plane_ticket_id,
-            mattermost_post_id=mattermost_post_id,
-            status="new"
-        )
-        session.add(new_ticket)
-        await session.commit()
-
+        await ticket_service.create_ticket(session, user, title, initial_message)
         await message.answer(
             "Обращение создано. Мы рассмотрим его как можно скорее.\n"
             "Вы можете продолжать отправлять сообщения в этот тикет."
@@ -128,66 +88,28 @@ async def process_confirmation(message: Message, state: FSMContext, session: Asy
 @router.message()
 async def process_message(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка всех остальных сообщений"""
-    user = await session.scalar(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
+    user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
     if not user:
         await message.answer("Пожалуйста, начните с команды /start для регистрации.")
         return
 
-    # Проверяем, есть ли выбранный тикет в состоянии
     state_data = await state.get_data()
     selected_ticket_id = state_data.get('selected_ticket_id')
     
     if selected_ticket_id:
-        # Если есть выбранный тикет, используем его
-        ticket = await session.scalar(
-            select(Ticket).where(Ticket.id == selected_ticket_id)
-        )
+        ticket = await ticket_service.get_ticket_by_id(session, selected_ticket_id)
         
         if ticket and ticket.status != 'closed':
-            # Добавляем сообщение к выбранному тикету
-            await plane_service.update_ticket(ticket.plane_ticket_id, message.text)
-            await mattermost_service.add_comment(ticket.mattermost_post_id,
-                                               message.text)
-            
-            # Сохраняем сообщение в БД
-            new_message = Message(
-                ticket_id=ticket.id,
-                content=message.text,
-                sender_type="user"
-            )
-            session.add(new_message)
-            await session.commit()
-            
+            await ticket_service.add_message_to_ticket(session, ticket, message.text)
             await message.answer("Сообщение добавлено к выбранной заявке.")
             return
     
-    # Если нет выбранного тикета или он закрыт, получаем последний тикет
-    last_ticket = await session.scalar(
-        select(Ticket)
-        .where(Ticket.user_id == user.id)
-        .order_by(Ticket.created_at.desc())
-    )
+    last_ticket = await ticket_service.get_last_ticket(session, user.id)
 
     if last_ticket and last_ticket.status != 'closed':
-        # Если есть открытый тикет, добавляем сообщение к нему
-        await plane_service.update_ticket(last_ticket.plane_ticket_id, message.text)
-        await mattermost_service.add_comment(last_ticket.mattermost_post_id,
-                                           message.text)
-        
-        # Сохраняем сообщение в БД
-        new_message = Message(
-            ticket_id=last_ticket.id,
-            content=message.text,
-            sender_type="user"
-        )
-        session.add(new_message)
-        await session.commit()
-        
+        await ticket_service.add_message_to_ticket(session, last_ticket, message.text)
         await message.answer("Сообщение добавлено к текущей заявке.")
     else:
-        # Если нет открытого тикета, начинаем создание нового
         await message.answer(
             "У вас нет активной заявки. Давайте создадим новую.\n"
             "Пожалуйста, введите название заявки (не более 100 символов):"

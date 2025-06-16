@@ -22,6 +22,11 @@ class MattermostService:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
         }
+        self.bot_user_id = settings.MATTERMOST_SUPPORT_USER_ID
+        
+    def is_bot_message(self, user_id: str) -> bool:
+        """Проверяет, является ли сообщение от бота"""
+        return user_id == self.bot_user_id
         
     async def create_thread(self, title: str, message: str) -> str:
         """Создает новую тему в Mattermost"""
@@ -29,20 +34,22 @@ class MattermostService:
             self.client.login()
             post = self.client.posts.create_post({
                 'channel_id': self.channel_id,
-                'message': f"### {title}\n{message}"
+                'message': f"### {title}\n{message}",
+                'props': {'from_bot': True}
             })
             return post['id']
         except Exception as e:
             raise Exception(f"Failed to create Mattermost thread: {str(e)}")
         
-    async def add_comment(self, thread_id: str, message: str):
+    async def add_comment(self, thread_id: str, message: str, is_bot: bool = False):
         """Добавляет комментарий в существующую тему"""
         try:
             self.client.login()
             self.client.posts.create_post({
                 'channel_id': self.channel_id,
                 'message': message,
-                'root_id': thread_id
+                'root_id': thread_id,
+                'props': {'from_bot': is_bot}
             })
         except Exception as e:
             raise Exception(f"Failed to add comment to Mattermost thread: {str(e)}")

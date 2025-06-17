@@ -89,5 +89,21 @@ class MattermostService:
         logger.error(f"Не удалось получить пост {post_id} после {max_retries} попыток")
         return None
 
+    async def get_user(self, user_id: str) -> dict:
+        """Получает информацию о пользователе через API Mattermost"""
+        url = f"https://{self.base_url}/api/v4/users/{user_id}"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=self.headers) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        logger.error(f"Ошибка при получении информации о пользователе {user_id}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Ошибка при запросе к Mattermost API: {e}")
+            return None
+
 # Создаем экземпляр сервиса
 mattermost_service = MattermostService()

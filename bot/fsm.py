@@ -5,6 +5,8 @@ from redis.asyncio import Redis
 class UserRegistration(StatesGroup):
     """Состояния для регистрации пользователя"""
     waiting_fullname = State()
+    waiting_company = State()
+    waiting_shop = State()
 
 class TicketCreation(StatesGroup):
     """Состояния для создания тикета"""

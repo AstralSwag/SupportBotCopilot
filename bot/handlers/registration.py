@@ -25,7 +25,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
     else:
         await message.answer(
             "Добро пожаловать! Для начала работы мне нужно знать ваше полное имя.\n"
-            "Пожалуйста, введите ваше полное имя:"
+            "Пожалуйста, введите ваше имя и фамилию. Например, \"Сергей Петров\":"
         )
         await state.set_state(UserRegistration.waiting_fullname)
 
@@ -38,17 +38,51 @@ async def process_fullname(message: Message, state: FSMContext, session: AsyncSe
         await message.answer("Пожалуйста, введите полное имя (имя и фамилию):")
         return
     
+    await state.update_data(full_name=full_name)
+    await state.set_state(UserRegistration.waiting_company)
+    await message.answer(
+        "В какой компании вы работаете? Например, \"Лента\":"
+    )
+
+@router.message(UserRegistration.waiting_company)
+async def process_company(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка ввода компании при регистрации"""
+    company = message.text.strip()
+    
+    if not company:
+        await message.answer("Пожалуйста, введите название компании:")
+        return
+    
+    await state.update_data(company=company)
+    await state.set_state(UserRegistration.waiting_shop)
+    await message.answer(
+        "На какой торговой точке (магазине) вы работаете? Напишите так как вы её обычно называете:"
+    )
+
+@router.message(UserRegistration.waiting_shop)
+async def process_shop(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка ввода магазина при регистрации"""
+    shop = message.text.strip()
+    
+    if not shop:
+        await message.answer("Пожалуйста, введите название магазина:")
+        return
+    
+    user_data = await state.get_data()
+    
     new_user = User(
         telegram_id=message.from_user.id,
         username=message.from_user.username,
-        full_name=full_name
+        full_name=user_data['full_name'],
+        company=user_data['company'],
+        shop=shop
     )
     session.add(new_user)
     await session.commit()
     
     await state.clear()
     await message.answer(
-        "Спасибо за регистрацию! Теперь вы можете отправить сообщение с описанием вашего вопроса.",
+        "Спасибо за регистрацию! Теперь вы можете отправить сообщение с описанием вашей проблемы.",
         reply_markup=get_main_keyboard()
     )
 

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.models.models import User
 from bot.services.ticket_service import TicketService
 from bot.fsm import TicketCreation, TicketSelection
-from bot.keyboards import get_tickets_keyboard
+from bot.keyboards import get_tickets_keyboard, get_confirmation_keyboard
 
 router = Router()
 ticket_service = TicketService()
@@ -33,40 +33,10 @@ async def process_title(message: Message, state: FSMContext, session: AsyncSessi
 @router.message(TicketCreation.waiting_description)
 async def process_description(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка описания тикета"""
-    await state.update_data(initial_message=message.text)
-    await state.set_state(TicketCreation.waiting_confirmation)
-    
     data = await state.get_data()
     title = data.get('title', '')
     
-    await message.answer(
-        f"Я создам новое обращение:\n"
-        f"Название: {title}\n"
-        f"Описание: {message.text}\n\n"
-        "Пожалуйста, подтвердите создание обращения (да/нет):"
-    )
-
-@router.message(TicketCreation.waiting_confirmation)
-async def process_confirmation(message: Message, state: FSMContext, session: AsyncSession):
-    """Обработка подтверждения создания тикета"""
-    if message.text.lower() not in ['да', 'нет']:
-        await message.answer("Пожалуйста, ответьте 'да' или 'нет':")
-        return
-
-    if message.text.lower() == 'нет':
-        await state.clear()
-        await message.answer("Создание обращения отменено.")
-        return
-
-    data = await state.get_data()
-    initial_message = data.get('initial_message')
-    title = data.get('title')
-    
-    if not initial_message or not title:
-        await state.clear()
-        await message.answer("Произошла ошибка. Пожалуйста, начните создание обращения заново.")
-        return
-
+    # Создаем тикет в базе данных
     user = await ticket_service.get_user_by_telegram_id(session, message.from_user.id)
     if not user:
         await message.answer("Пожалуйста, начните с команды /start для регистрации.")
@@ -74,16 +44,75 @@ async def process_confirmation(message: Message, state: FSMContext, session: Asy
         return
 
     try:
-        await ticket_service.create_ticket(session, user, title, initial_message)
+        # Создаем тикет со статусом "pending"
+        ticket = await ticket_service.create_pending_ticket(session, user, title, message.text)
+        await state.update_data(ticket_id=ticket.id)
+        await state.set_state(TicketCreation.waiting_confirmation)
+        
         await message.answer(
-            "Обращение создано. Мы рассмотрим его как можно скорее.\n"
-            "Вы можете продолжать отправлять сообщения в этот тикет."
+            f"Я создам новое обращение:\n"
+            f"Название: *#{ticket.id} {title}*\n"
+            f"Описание: {message.text}\n\n"
+            "Пожалуйста, подтвердите создание обращения:",
+            reply_markup=get_confirmation_keyboard(),
+            parse_mode="Markdown"
         )
     except Exception as e:
         await message.answer("Произошла ошибка при создании обращения. Пожалуйста, попробуйте позже.")
         print(f"Error creating ticket: {e}")
+        await state.clear()
+
+@router.callback_query(F.data == "confirm_ticket")
+async def process_confirmation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработка подтверждения создания тикета"""
+    data = await state.get_data()
+    ticket_id = data.get('ticket_id')
+    
+    if not ticket_id:
+        await callback.message.edit_text("Произошла ошибка. Пожалуйста, начните создание обращения заново.")
+        await state.clear()
+        return
+
+    try:
+        # Получаем тикет
+        ticket = await ticket_service.get_ticket_by_id(session, ticket_id)
+        if not ticket:
+            await callback.message.edit_text("Тикет не найден. Пожалуйста, начните создание обращения заново.")
+            await state.clear()
+            return
+
+        # Отправляем тикет в Mattermost и Plane
+        await ticket_service.activate_ticket(session, ticket)
+        
+        await callback.message.edit_text(
+            f"Обращение *#{ticket.id} {ticket.title}* создано. Мы ответим вам в течение 5 минут.\n"
+            "Вы можете продолжать отправлять сообщения, они будут добавлены к заявке.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при создании обращения. Пожалуйста, попробуйте позже.")
+        print(f"Error activating ticket: {e}")
     finally:
         await state.clear()
+
+@router.callback_query(F.data == "cancel_ticket")
+async def process_cancellation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработка отмены создания тикета"""
+    data = await state.get_data()
+    ticket_id = data.get('ticket_id')
+    
+    if ticket_id:
+        try:
+            # Получаем тикет
+            ticket = await ticket_service.get_ticket_by_id(session, ticket_id)
+            if ticket:
+                # Отменяем тикет
+                await ticket_service.cancel_ticket(session, ticket)
+        except Exception as e:
+            print(f"Error canceling ticket: {e}")
+    
+    await state.clear()
+    await callback.message.edit_text("Создание обращения отменено.")
 
 @router.message()
 async def process_message(message: Message, state: FSMContext, session: AsyncSession):

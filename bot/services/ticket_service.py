@@ -42,9 +42,10 @@ class TicketService:
 
     async def get_ticket_by_id(self, session: AsyncSession, ticket_id: int) -> Optional[Ticket]:
         """Получает тикет по ID"""
-        return await session.scalar(
+        result = await session.execute(
             select(Ticket).where(Ticket.id == ticket_id)
         )
+        return result.scalar_one_or_none()
 
     async def get_last_ticket(self, session: AsyncSession, user_id: int) -> Optional[Ticket]:
         """Получает последний тикет пользователя"""
@@ -56,6 +57,10 @@ class TicketService:
 
     async def create_ticket(self, session: AsyncSession, user: User, title: str, description: str) -> Ticket:
         """Создает новый тикет"""
+        # Для Telegram оставляем оригинальный заголовок
+        telegram_title = title
+        
+        # Для Mattermost и Plane добавляем полное имя пользователя
         full_title = f"{user.full_name}: {title}"
         
         plane_ticket_id = await self.plane_service.create_ticket(full_title, description)
@@ -63,7 +68,7 @@ class TicketService:
         
         new_ticket = Ticket(
             user_id=user.id,
-            title=title,
+            title=telegram_title,  # Сохраняем оригинальный заголовок для Telegram
             plane_ticket_id=plane_ticket_id,
             mattermost_post_id=mattermost_post_id,
             status="new"
@@ -113,4 +118,62 @@ class TicketService:
         """Закрывает тикет"""
         ticket.status = 'closed'
         ticket.closed_at = datetime.utcnow()
-        await session.commit() 
+        await session.commit()
+
+    async def create_pending_ticket(self, session: AsyncSession, user: User, title: str, description: str) -> Ticket:
+        """Создает тикет в статусе pending"""
+        ticket = Ticket(
+            user_id=user.id,
+            title=title,
+            description=description,
+            status="pending"
+        )
+        session.add(ticket)
+        await session.commit()
+        await session.refresh(ticket)
+        return ticket
+
+    async def activate_ticket(self, session: AsyncSession, ticket: Ticket) -> None:
+        """Активирует тикет, отправляя его в Mattermost и Plane"""
+        # Получаем пользователя для добавления его имени в заголовок
+        user = await self.get_user_by_id(session, ticket.user_id)
+        if not user:
+            raise ValueError(f"User not found for ticket {ticket.id}")
+        
+        # Формируем заголовок с полным именем пользователя
+        full_title = f"#{ticket.id} {user.full_name}: {ticket.title}"
+        
+        # Отправляем в Mattermost
+        thread_id = await self.mattermost_service.create_thread(
+            title=full_title,
+            message=ticket.description
+        )
+        
+        # Отправляем в Plane
+        plane_id = await self.plane_service.create_ticket(
+            title=full_title,
+            description=ticket.description
+        )
+        
+        # Обновляем статус тикета
+        ticket.status = "active"
+        ticket.mattermost_post_id = thread_id
+        ticket.plane_ticket_id = plane_id
+        await session.commit()
+
+    async def cancel_ticket(self, session: AsyncSession, ticket: Ticket) -> None:
+        """Отменяет тикет"""
+        ticket.status = "canceled"
+        await session.commit()
+
+    async def add_message(self, session: AsyncSession, ticket: Ticket, message_text: str, is_from_user: bool = True) -> TicketMessage:
+        """Добавляет сообщение к тикету"""
+        message = TicketMessage(
+            ticket_id=ticket.id,
+            text=message_text,
+            is_from_user=is_from_user
+        )
+        session.add(message)
+        await session.commit()
+        await session.refresh(message)
+        return message 

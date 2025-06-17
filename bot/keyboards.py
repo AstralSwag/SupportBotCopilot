@@ -25,4 +25,14 @@ def get_tickets_keyboard(tickets: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
             callback_data=f"ticket_{ticket['id']}"
         )])
     
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_confirmation_keyboard() -> InlineKeyboardMarkup:
+    """Создает клавиатуру подтверждения с кнопками 'Подтвердить' и 'Отмена'"""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_ticket"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ticket")
+        ]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard) 

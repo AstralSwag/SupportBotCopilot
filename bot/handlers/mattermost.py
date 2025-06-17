@@ -76,11 +76,23 @@ async def mattermost_webhook(
             logger.info("Сообщение от бота, игнорируем")
             return {"status": "ok", "message": "Message from bot"}
 
+        # Получаем информацию о пользователе Mattermost
+        mattermost_user = await mattermost_service.get_user(user_id)
+        if not mattermost_user:
+            logger.error(f"Не удалось получить информацию о пользователе Mattermost {user_id}")
+            return {"status": "error", "message": "Failed to get Mattermost user info"}
+
+        # Получаем полное имя пользователя
+        first_name = mattermost_user.get('first_name', '')
+        last_name = mattermost_user.get('last_name', '')
+        full_name = f"{first_name} {last_name}".strip() or mattermost_user.get('username', 'Сотрудник поддержки')
+
         # Отправляем сообщение в Telegram
         try:
             await bot.send_message(
                 chat_id=user.telegram_id,
-                text=f"Сообщение от поддержки:\n\n{message_text}"
+                text=f"Ответ по заявке *{ticket.title}*\n\n_👔 {full_name}_:\n\n{message_text}",
+                parse_mode="Markdown"
             )
             logger.info(f"Сообщение отправлено пользователю {user.telegram_id}")
         except Exception as e:

@@ -10,6 +10,8 @@ class User(Base):
     telegram_id = Column(Integer, unique=True, nullable=False)
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=False)
+    company = Column(String, nullable=False)
+    shop = Column(String, nullable=False)
     registered_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     
@@ -21,10 +23,12 @@ class Ticket(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String(100), nullable=False)
-    plane_ticket_id = Column(String, nullable=False)
-    mattermost_post_id = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    plane_ticket_id = Column(String, nullable=True)
+    mattermost_post_id = Column(String, nullable=True)
     status = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    closed_at = Column(DateTime, nullable=True)
     
     user = relationship("User", back_populates="tickets")
     messages = relationship("Message", back_populates="ticket")
